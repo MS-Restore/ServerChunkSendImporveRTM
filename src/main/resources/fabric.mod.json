@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "serverchunksendimporvertm",
+  "version": "${version}",
+  "name": "ServerChunkSendImporveRTM",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/serverchunksendimporvertm/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "fabric-datagen": [
+      "fun.bm.serverchunksendimporvertm.client.ServerchunksendimporvertmDataGenerator"
+    ],
+    "main": [
+      "fun.bm.serverchunksendimporvertm.Serverchunksendimporvertm"
+    ]
+  },
+  "mixins": [
+    "serverchunksendimporvertm.mixins.json",
+    {
+      "config": "serverchunksendimporvertm.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
