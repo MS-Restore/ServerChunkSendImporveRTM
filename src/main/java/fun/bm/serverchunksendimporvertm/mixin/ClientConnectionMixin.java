@@ -21,9 +21,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
-import java.util.PriorityQueue;
-import java.util.Queue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Mixin(ClientConnection.class)
@@ -38,7 +39,7 @@ public class ClientConnectionMixin {
 
     @Shadow
     @Final
-    private Queue<Objects> packetQueue;
+    private java.util.Queue<Objects> packetQueue;
 
     @Shadow
     public void send(Packet<?> packet, @Nullable PacketCallbacks callbacks) {
@@ -48,7 +49,7 @@ public class ClientConnectionMixin {
     private AtomicBoolean isInQueue;
 
     @Unique
-    private PriorityQueue<RTMQueuedPacket> chunkPacketQueue;
+    private PriorityBlockingQueue<RTMQueuedPacket> chunkPacketQueue;
 
     @Unique
     private final static long MAX_WAITING_TIME = 100; // 2ticks, 0.1s
@@ -64,10 +65,10 @@ public class ClientConnectionMixin {
     @Inject(method = "<init>", at = @At("TAIL"))
     private void init(CallbackInfo ci) {
         this.isInQueue = new AtomicBoolean(false);
-        this.chunkPacketQueue = new PriorityQueue<>((a, b) -> {
+        this.chunkPacketQueue = new PriorityBlockingQueue<>(11, (a, b) -> {
             int distA = getChunkDistance((ChunkDataS2CPacket) a.packet);
             int distB = getChunkDistance((ChunkDataS2CPacket) b.packet);
-            return Double.compare(distA, distB);
+            return Integer.compare(distA, distB);
         });
         this.lastTickTime = System.currentTimeMillis();
     }
@@ -92,40 +93,42 @@ public class ClientConnectionMixin {
             RTMQueuedPacket queuedPacket = new RTMQueuedPacket(packet1, callbacks);
             this.chunkPacketQueue.add(queuedPacket);
         } else if (packet instanceof BlockUpdateS2CPacket p1) {
-            this.chunkPacketQueue.forEach(queuedPacket -> {
-                if (queuedPacket == null) return;
-                ChunkPos chunkPos = new ChunkPos(p1.getPos());
+            ChunkPos chunkPos = new ChunkPos(p1.getPos());
+            List<RTMQueuedPacket> snapshot = new ArrayList<>(this.chunkPacketQueue);
+            for (RTMQueuedPacket queuedPacket : snapshot) {
+                if (queuedPacket == null) continue;
                 ChunkDataS2CPacket chunkData = (ChunkDataS2CPacket) queuedPacket.packet;
                 if (chunkPos.x == chunkData.getX() && chunkPos.z == chunkData.getZ()) {
                     queuedPacket.handle(packet, callbacks);
                     ci.cancel();
                 }
-            });
+            }
         } else if (packet instanceof RewrittenChunkDeltaUpdateS2CPacket p2) {
-            this.chunkPacketQueue.forEach(queuedPacket -> {
-                if (queuedPacket == null) return;
-                ChunkPos chunkPos = p2.pos;
+            ChunkPos chunkPos = p2.pos;
+            List<RTMQueuedPacket> snapshot = new ArrayList<>(this.chunkPacketQueue);
+            for (RTMQueuedPacket queuedPacket : snapshot) {
+                if (queuedPacket == null) continue;
                 ChunkDataS2CPacket chunkData = (ChunkDataS2CPacket) queuedPacket.packet;
                 if (chunkPos.x == chunkData.getX() && chunkPos.z == chunkData.getZ()) {
                     queuedPacket.handle(p2.original, callbacks);
                     ci.cancel();
                 }
-            });
+            }
             ci.cancel();
             this.send(p2.original, callbacks);
         } else if (packet instanceof LightUpdateS2CPacket p3) {
-            this.chunkPacketQueue.forEach(queuedPacket -> {
-                if (queuedPacket == null) return;
-                ChunkPos chunkPos = new ChunkPos(p3.getChunkX(), p3.getChunkZ());
+            ChunkPos chunkPos = new ChunkPos(p3.getChunkX(), p3.getChunkZ());
+            List<RTMQueuedPacket> snapshot = new ArrayList<>(this.chunkPacketQueue);
+            for (RTMQueuedPacket queuedPacket : snapshot) {
+                if (queuedPacket == null) continue;
                 ChunkDataS2CPacket chunkData = (ChunkDataS2CPacket) queuedPacket.packet;
                 if (chunkPos.x == chunkData.getX() && chunkPos.z == chunkData.getZ()) {
                     queuedPacket.handle(packet, callbacks);
                     ci.cancel();
                 }
-            });
+            }
         }
     }
-
 
     @Inject(method = "sendQueuedPackets", at = @At("TAIL"))
     private void sendQueuedPacketsTail(CallbackInfo ci) {
@@ -137,14 +140,21 @@ public class ClientConnectionMixin {
         if (isInQueue.get()) return;
         isInQueue.set(true);
         boolean firstSend = true;
-        while ((firstSend || System.currentTimeMillis() < lastTickTime + MAX_WAITING_TIME) && !this.chunkPacketQueue.isEmpty()) {
+        boolean empty = this.chunkPacketQueue.isEmpty();
+
+        while ((firstSend || System.currentTimeMillis() < lastTickTime + MAX_WAITING_TIME) && !empty) {
             if (!this.packetQueue.isEmpty()) {
                 sendQueuedPackets();
             }
             if (firstSend || System.currentTimeMillis() < lastTickTime + MAX_WAITING_TIME) {
                 RTMQueuedPacket queuedPacket = this.chunkPacketQueue.poll();
-                sendAll(queuedPacket);
-                firstSend = false;
+                if (queuedPacket != null) {
+                    sendAll(queuedPacket);
+                    firstSend = false;
+                    empty = this.chunkPacketQueue.isEmpty();
+                } else {
+                    empty = true;
+                }
             }
         }
         isInQueue.set(false);
