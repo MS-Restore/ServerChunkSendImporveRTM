@@ -52,7 +52,7 @@ public class ClientConnectionMixin {
     private PriorityBlockingQueue<RTMQueuedPacket> chunkPacketQueue;
 
     @Unique
-    private final static long MAX_WAITING_TIME = 100; // 2ticks, 0.1s
+    private final static long MAX_WAITING_TIME = 40; // 0.8ticks, 0.04s
 
     @Unique
     private long lastTickTime;
