@@ -4,7 +4,9 @@
   "package": "fun.bm.serverchunksendimporvertm.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
+    "ChunkHolderMixin",
     "ClientConnectionMixin",
+    "ServerPlayNetworkHandlerMixin",
     "ThreadedAnvilChunkStorageMixin"
   ],
   "injectors": {
