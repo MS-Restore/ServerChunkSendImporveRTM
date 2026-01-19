@@ -10,6 +10,7 @@ import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
 import net.minecraft.network.packet.s2c.play.LightUpdateS2CPacket;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import org.jetbrains.annotations.Nullable;
@@ -88,7 +89,22 @@ public class ClientConnectionMixin {
     @Inject(method = "send(Lnet/minecraft/network/packet/Packet;Lnet/minecraft/network/PacketCallbacks;)V",
             at = @At("HEAD"), cancellable = true)
     private void onSend(Packet<?> packet, PacketCallbacks callbacks, CallbackInfo ci) {
-        if (packet instanceof ChunkDataS2CPacket packet1) { // always queue chunk packets
+        if (packet instanceof ChunkDataS2CPacket packet1) { // always queue chunk packets except the chunk player is standing in
+            ServerPlayerEntity player;
+            ChunkPos pos;
+            try {
+                player = ConnectionStore.getPlayer((ClientConnection) (Object) this);
+                pos = player.getChunkPos();
+            } catch (Exception ignored) {
+                // do nothing if player is not found
+                pos = null;
+                player = null;
+            }
+            if (pos != null) {
+                if (Math.abs(pos.x - packet1.getX()) < 2 && Math.abs(pos.z - packet1.getZ()) < 2) {
+                    return; // send directly if player is standing in the chunk
+                }
+            }
             ci.cancel();
             RTMQueuedPacket queuedPacket = new RTMQueuedPacket(packet1, callbacks);
             this.chunkPacketQueue.add(queuedPacket);
@@ -149,6 +165,24 @@ public class ClientConnectionMixin {
             if (firstSend || System.currentTimeMillis() < lastTickTime + MAX_WAITING_TIME) {
                 RTMQueuedPacket queuedPacket = this.chunkPacketQueue.poll();
                 if (queuedPacket != null) {
+                    ServerPlayerEntity player;
+                    ChunkPos pos;
+                    try {
+                        player = ConnectionStore.getPlayer((ClientConnection) (Object) this);
+                        pos = player.getChunkPos();
+                    } catch (Exception ignored) {
+                        // do nothing if player is not found
+                        pos = null;
+                        player = null;
+                    }
+                    if (pos != null) {
+                        int view = player.getServer().getPlayerManager().getViewDistance();
+                        ChunkDataS2CPacket packet = (ChunkDataS2CPacket) queuedPacket.packet;
+                        // if chunk is too far away for now, skip to send
+                        if (Math.abs(packet.getX() - pos.x) > 2 * view && Math.abs(packet.getZ() - pos.x) > 2 * view) {
+                            continue;
+                        }
+                    }
                     sendAll(queuedPacket);
                     firstSend = false;
                     empty = this.chunkPacketQueue.isEmpty();
